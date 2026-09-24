@@ -1,0 +1,31 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
+
+## [0.2.0] - 2026-09-25
+
+### Breaking
+
+- In sessions without an interactive UI (print and JSON modes), `/rewrite` now fails immediately with an error. Before, it made the model calls and silently discarded the result.
+- On omp older than 18.3.0, `/rewrite` reports the required version before asking for a draft. Before, it failed only after you had written the draft.
+- All notifications now use the `/rewrite: …` format (for example `/rewrite: cancelled; draft restored to the composer`). RPC clients that match the old texts need updating.
+
+### Added
+
+- An omp plugin marketplace catalog (`.omp-plugin/marketplace.json`). Install with `/marketplace add zPeppOz/omp-rewrite` and `/marketplace install omp-rewrite@omp-rewrite`.
+- A test suite (`bun test`) and CI.
+
+### Changed
+
+- A single malformed question from the model no longer drops all questions. Invalid optional fields (`header`, `multi`, `recommended`) are ignored, and options given as plain strings are accepted.
+- The streaming preview wraps long lines and follows the newest text. Before, it froze on the first ~100 characters of a long line. Preview updates are throttled to 10 per second: an RPC rewrite that sent 412 widget frames now sends 9.
+- Hosts without the rich ask dialog (RPC, ACP) mark the recommended option in its description.
+- The "(Esc to cancel)" hint only appears in the TUI, the only mode where Esc reaches the extension.
+- Closing the draft editor with Esc cancels without a warning. Submitting it empty shows the usage.
+- Pressing Esc while a side turn is finishing counts as a cancel. Before, the result was still placed in the composer.
+
+## [0.1.0] - 2026-09-25
+
+### Added
+
+- `/rewrite` command: direction questions, rewrite, result in the composer.

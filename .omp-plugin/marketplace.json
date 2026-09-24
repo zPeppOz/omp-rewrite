@@ -1,0 +1,25 @@
+{
+  "name": "omp-rewrite",
+  "owner": {
+    "name": "Giuseppe Setaro"
+  },
+  "metadata": {
+    "description": "omp marketplace for the /rewrite extension"
+  },
+  "plugins": [
+    {
+      "name": "omp-rewrite",
+      "description": "/rewrite: turns a rough draft prompt into a thorough one, asking clarifying questions first, via a /btw-style side turn",
+      "version": "0.2.0",
+      "author": {
+        "name": "Giuseppe Setaro"
+      },
+      "homepage": "https://github.com/zPeppOz/omp-rewrite",
+      "repository": "https://github.com/zPeppOz/omp-rewrite",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["prompt", "rewrite", "clarifying-questions", "slash-command", "extension"],
+      "source": "./"
+    }
+  ]
+}
