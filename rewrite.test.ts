@@ -1,7 +1,57 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_QUESTIONS, parseQuestions, previewRows } from "./rewrite";
+import { MAX_QUESTIONS, parseQuestions, previewRows, rewritePrompt } from "./rewrite";
 
 const option = (label: string) => ({ label });
+
+describe("rewritePrompt", () => {
+	const draft = "fix the login bug";
+	const answers = [{ question: "Scope?", answer: "Only auth" }];
+	// Regole di default = tutto ciò che precede i dati; evita di fissare il loro testo nei test.
+	const defaultRules = rewritePrompt("", []).split("\n\n<draft>")[0];
+
+	test("without custom instructions there is no custom block", () => {
+		const prompt = rewritePrompt(draft, answers);
+		expect(prompt).not.toContain("custom_instructions");
+		expect(prompt.startsWith(defaultRules)).toBe(true);
+	});
+
+	test("append keeps the default rules and adds the labelled instructions before the data", () => {
+		const prompt = rewritePrompt(draft, answers, { global: "GLOBAL TEXT", project: "PROJECT TEXT", mode: "append" });
+		expect(prompt.startsWith(defaultRules)).toBe(true);
+		expect(prompt).toContain("<global>\nGLOBAL TEXT\n</global>");
+		expect(prompt).toContain("<project>\nPROJECT TEXT\n</project>");
+		const at = (text: string) => prompt.indexOf(text);
+		expect(at(defaultRules)).toBeLessThan(at("<custom_instructions>"));
+		expect(at("GLOBAL TEXT")).toBeLessThan(at("PROJECT TEXT"));
+		expect(at("</custom_instructions>")).toBeLessThan(at("<draft>"));
+	});
+
+	test("replace drops the default rules but keeps the draft and the decisions", () => {
+		const prompt = rewritePrompt(draft, answers, { project: "ONLY PROJECT", mode: "replace" });
+		expect(prompt).not.toContain(defaultRules);
+		expect(prompt).toContain("<project>\nONLY PROJECT\n</project>");
+		expect(prompt).not.toContain("<global>");
+		expect(prompt).toContain(`<draft>\n${draft}\n</draft>`);
+		expect(prompt).toContain("- Q: Scope?\n  A: Only auth");
+	});
+
+	test("the draft and the decisions come after the instructions in every mode", () => {
+		for (const mode of ["append", "replace"] as const) {
+			const prompt = rewritePrompt(draft, answers, { global: "G", mode });
+			// L'introduzione può citare i tag per nome: si cercano i blocchi dati veri.
+			const draftBlock = prompt.indexOf(`<draft>\n${draft}\n</draft>`);
+			expect(prompt.indexOf("</custom_instructions>")).toBeLessThan(draftBlock);
+			expect(draftBlock).toBeLessThan(prompt.indexOf("<decisions>\n- Q:"));
+		}
+	});
+
+	test("only says which side wins when both scopes are present", () => {
+		const both = rewritePrompt(draft, [], { global: "G", project: "P", mode: "append" });
+		const one = rewritePrompt(draft, [], { global: "G", mode: "append" });
+		expect(both).toContain("project instructions win");
+		expect(one).not.toContain("project instructions win");
+	});
+});
 
 describe("parseQuestions", () => {
 	test("a malformed question is dropped without losing the valid ones", () => {

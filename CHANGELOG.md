@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Custom instructions for the rewrite prompt, global (`~/.omp/agent/config.yml`) and per project (`<cwd>/.omp/config.yml`), as `rewrite.instructions` and `rewrite.instructionsMode`. When both scopes have text, both apply, global first, then project. Without any, the prompt is unchanged.
+- `rewrite.instructionsMode`: `append` (default) adds the instructions to the default rewrite rules; `replace` swaps the rules for yours, keeping the draft, your answers and a short output frame. The effective mode is the project's, else the global one, else `append`.
+- `/rewrite-settings` command to edit the instructions of a scope in an editor (saving empty clears it) and pick the mode. It exists because omp's `/settings` panel can't show extension fields.
+
 ## [0.2.0] - 2026-09-25
 
 ### Breaking

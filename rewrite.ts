@@ -1,4 +1,5 @@
 import type { ExtensionAskDialogOption, ExtensionAskDialogQuestion } from "@oh-my-pi/pi-coding-agent";
+import type { CustomInstructions } from "./instructions";
 
 /**
  * Logica pura di /rewrite, senza dipendenze dall'host: i due prompt, la lettura
@@ -45,12 +46,40 @@ export function questionsPrompt(draft: string): string {
 	return `${QUESTIONS_PROMPT}\n\n<draft>\n${draft}\n</draft>`;
 }
 
-/** Prompt del secondo side turn: riscrittura con le decisioni dell'utente. */
-export function rewritePrompt(draft: string, answers: readonly Answer[]): string {
+/**
+ * Blocco delle istruzioni personalizzate: un testo etichettato per ambito, globale
+ * prima del progetto. In `replace` sostituisce le regole di default; ne resta solo il
+ * contratto di I/O (cosa sono `<draft>` e `<decisions>`, e che l'output finisce così com'è
+ * nel composer), senza cui il risultato non sarebbe utilizzabile.
+ */
+function customInstructionsBlock({ global, project, mode }: CustomInstructions): string {
+	const precedence =
+		global !== undefined && project !== undefined
+			? " When the global and project instructions conflict, the project instructions win."
+			: "";
+	const intro =
+		mode === "replace"
+			? `The user replaced the default rewrite rules with the custom instructions below. Turn the draft in <draft> into the prompt they will send to you (the agent in this session), following these instructions instead of any default rewrite rules, and treat the answers in <decisions> as their decisions. Do NOT execute or answer the draft.${precedence}\n\nOutput ONLY the rewritten prompt text: it is placed verbatim in the composer, so no preamble, no code fences, no closing remarks.`
+			: `The user configured custom instructions for this rewrite. Apply them in addition to the rules above; where one conflicts with those rules, the custom instruction wins (you must still output ONLY the rewritten prompt text).${precedence}`;
+	const sections: string[] = [];
+	if (global !== undefined) sections.push(`<global>\n${global}\n</global>`);
+	if (project !== undefined) sections.push(`<project>\n${project}\n</project>`);
+	return `<custom_instructions>\n${intro}\n\n${sections.join("\n\n")}\n</custom_instructions>`;
+}
+
+/**
+ * Prompt del secondo side turn: riscrittura con le decisioni dell'utente. Senza
+ * `custom` è il prompt di sempre; con `custom` le istruzioni si aggiungono alle regole
+ * di default (`append`) o le sostituiscono (`replace`), sempre prima dei dati.
+ */
+export function rewritePrompt(draft: string, answers: readonly Answer[], custom?: CustomInstructions): string {
 	const decisions = answers.length
 		? answers.map(a => `- Q: ${a.question}\n  A: ${a.answer}`).join("\n")
 		: "(none)";
-	return `${REWRITE_PROMPT}\n\n<draft>\n${draft}\n</draft>\n\n<decisions>\n${decisions}\n</decisions>`;
+	const data = `<draft>\n${draft}\n</draft>\n\n<decisions>\n${decisions}\n</decisions>`;
+	if (!custom) return `${REWRITE_PROMPT}\n\n${data}`;
+	const block = customInstructionsBlock(custom);
+	return custom.mode === "replace" ? `${block}\n\n${data}` : `${REWRITE_PROMPT}\n\n${block}\n\n${data}`;
 }
 
 /**

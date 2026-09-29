@@ -3,13 +3,29 @@ import type {
 	ExtensionAskDialogQuestion,
 	ExtensionCommandContext,
 } from "@oh-my-pi/pi-coding-agent";
+import {
+	DEFAULT_MODE,
+	type InstructionsEdit,
+	type InstructionsMode,
+	type LayerValues,
+	readLayer,
+	resolveInstructions,
+	type Scope,
+} from "./instructions";
 import { type Answer, parseQuestions, previewRows, questionsPrompt, rewritePrompt } from "./rewrite";
+import { type HostSettings, projectConfigPath, saveGlobal, saveProject } from "./storage";
 
 /**
  * /rewrite <bozza>
  *
  * Side turn stile /btw: usa il contesto della sessione corrente e non scrive nulla
  * nella history. Flusso: domande di direzione (0–4) → riscrittura → composer.
+ * Le istruzioni personalizzate (globali e di progetto) si aggiungono al prompt di
+ * riscrittura, o lo sostituiscono.
+ *
+ * /rewrite-settings
+ *
+ * Modifica quelle istruzioni: il pannello /settings di omp non ospita campi di estensioni.
  */
 
 const WIDGET_KEY = "rewrite";
@@ -120,7 +136,12 @@ function putInComposer(ctx: ExtensionCommandContext, text: string): void {
 }
 
 /** Domande → riscrittura → composer. Su annullamento o errore la bozza torna nel composer. */
-async function rewrite(ctx: ExtensionCommandContext, runEphemeralTurn: RunEphemeralTurn, draft: string): Promise<void> {
+async function rewrite(
+	ctx: ExtensionCommandContext,
+	runEphemeralTurn: RunEphemeralTurn,
+	settings: HostSettings,
+	draft: string,
+): Promise<void> {
 	const restore = (message: string, type: "info" | "error") => {
 		putInComposer(ctx, draft);
 		ctx.ui.notify(message, type);
@@ -141,7 +162,10 @@ async function rewrite(ctx: ExtensionCommandContext, runEphemeralTurn: RunEpheme
 			answers = answered;
 		}
 
-		const rewritten = await sideTurn(ctx, runEphemeralTurn, "rewriting the prompt", rewritePrompt(draft, answers), {
+		// Le impostazioni si leggono qui, non all'avvio: valgono le ultime modifiche.
+		const { custom, warnings } = resolveInstructions(settings.getGlobalSettings(), settings.getProjectSettings());
+		for (const warning of warnings) ctx.ui.notify(warning, "warning");
+		const rewritten = await sideTurn(ctx, runEphemeralTurn, "rewriting the prompt", rewritePrompt(draft, answers, custom), {
 			preview: true,
 		});
 		if (rewritten === undefined) return restore(CANCELLED, "info");
@@ -153,6 +177,68 @@ async function rewrite(ctx: ExtensionCommandContext, runEphemeralTurn: RunEpheme
 		const reason = err instanceof Error ? err.message : String(err);
 		restore(`/rewrite: failed (${reason}); draft restored to the composer`, "error");
 	}
+}
+
+/** Sceglie la modalità di combinazione; `undefined` = annullato. `"inherit"` solo per il progetto. */
+async function pickMode(
+	ctx: ExtensionCommandContext,
+	scope: Scope,
+	current: InstructionsMode | undefined,
+): Promise<InstructionsMode | "inherit" | undefined> {
+	const options = [
+		{ label: "append", description: "Your instructions are added to the default rewrite rules" },
+		{
+			label: "replace",
+			description: "Your instructions replace the default rewrite rules (the draft and your answers are still sent)",
+		},
+	];
+	if (scope === "project") {
+		options.unshift({ label: "inherit", description: `Use the global mode (default: ${DEFAULT_MODE})` });
+	}
+	const initialIndex = Math.max(0, options.findIndex(o => o.label === (current ?? (scope === "project" ? "inherit" : DEFAULT_MODE))));
+	const choice = await ctx.ui.select(`Custom instructions mode (${scope})`, options, { initialIndex });
+	return choice as InstructionsMode | "inherit" | undefined;
+}
+
+const describeLayer = ({ instructions, mode }: LayerValues) =>
+	instructions ? `${instructions.split("\n").length} line(s), mode ${mode ?? "default"}` : "not set";
+
+/**
+ * /rewrite-settings: ambito → testo (salvare vuoto lo svuota) → modalità. Esc in un
+ * qualsiasi passo annulla senza modificare nulla.
+ */
+async function editInstructions(ctx: ExtensionCommandContext, settings: HostSettings): Promise<void> {
+	const layers: Record<Scope, LayerValues> = {
+		global: readLayer(settings.getGlobalSettings(), "global"),
+		project: readLayer(settings.getProjectSettings(), "project"),
+	};
+	const choice = await ctx.ui.select("Custom rewrite instructions: which scope?", [
+		{ label: "Global", description: `${describeLayer(layers.global)}; applies to every project` },
+		{ label: "Project", description: `${describeLayer(layers.project)}; ${projectConfigPath(settings.getCwd())}` },
+	]);
+	if (choice === undefined) return;
+	const scope: Scope = choice === "Global" ? "global" : "project";
+
+	const typed = await ctx.ui.editor(`Custom /rewrite instructions (${scope}); save empty to clear`, layers[scope].instructions ?? "");
+	if (typed === undefined) return;
+	const instructions = typed.trim();
+	let edit: InstructionsEdit = { instructions: undefined, mode: undefined };
+	if (instructions) {
+		const mode = await pickMode(ctx, scope, layers[scope].mode);
+		if (mode === undefined) return;
+		edit = { instructions, mode: mode === "inherit" ? undefined : mode };
+	}
+
+	let where: string;
+	if (scope === "global") {
+		await saveGlobal(settings, edit);
+		where = "the global settings";
+	} else {
+		where = await saveProject(settings, edit);
+	}
+	const mode = edit.mode ?? (scope === "global" ? DEFAULT_MODE : "inherited");
+	const what = instructions ? `saved (mode ${mode})` : "cleared";
+	ctx.ui.notify(`/rewrite-settings: ${scope} instructions ${what} in ${where}`, "info");
 }
 
 export default function rewriteExtension(pi: ExtensionAPI) {
@@ -186,9 +272,21 @@ export default function rewriteExtension(pi: ExtensionAPI) {
 					ctx.ui.notify("/rewrite: empty draft; usage: /rewrite <draft>", "warning");
 					return;
 				}
-				await rewrite(ctx, runEphemeralTurn, draft);
+				await rewrite(ctx, runEphemeralTurn, pi.pi.settings, draft);
 			} finally {
 				busy = false;
+			}
+		},
+	});
+
+	pi.registerCommand("rewrite-settings", {
+		description: "Edit the custom instructions added to the /rewrite prompt (global or project)",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) throw new Error("/rewrite-settings: needs an interactive UI (TUI or RPC)");
+			try {
+				await editInstructions(ctx, pi.pi.settings);
+			} catch (err) {
+				ctx.ui.notify(`/rewrite-settings: failed (${err instanceof Error ? err.message : String(err)})`, "error");
 			}
 		},
 	});
