@@ -107,6 +107,9 @@ async function sideTurn(
 	try {
 		const { replyText } = await runEphemeralTurn({
 			promptText,
+			// Di default omp accorcia la risposta a 4 KiB (con "[…truncated]" in coda) e
+			// comprime le righe ripetute: pensato per /btw, rovina un prompt riscritto o il JSON delle domande.
+			dedupeReply: false,
 			signal: controller.signal,
 			onTextDelta: preview
 				? delta => {

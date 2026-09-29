@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - `rewrite.instructionsMode`: `append` (default) adds the instructions to the default rewrite rules; `replace` swaps the rules for yours, keeping the draft, your answers and a short output frame. The effective mode is the project's, else the global one, else `append`.
 - `/rewrite-settings` command to edit the instructions of a scope in an editor (saving empty clears it) and pick the mode. It exists because omp's `/settings` panel can't show extension fields.
 
+### Fixed
+
+- Long rewrites no longer end in `[…truncated]`. omp cuts side-turn replies to 4 KiB and collapses runs of identical lines unless told otherwise; `/rewrite` now asks for the full reply, for both the rewrite and the questions JSON.
+
 ## [0.2.0] - 2026-09-25
 
 ### Breaking
